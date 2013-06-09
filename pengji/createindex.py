@@ -9,14 +9,16 @@ import time
 DATABASE = "minidb"
 SPLITTAG = "|"
 BLOCKSIZE = 16384
-def ceateDataBase(dbName):
-    print 
+METADATA =None
+
+
 '''
 获取数据库名字
 db.desc文件一共两行，一行为所有数据库名字，第二行为当前使用的数据名,如：
     minidb|dbproject
     minidb
 '''
+#暂未使用本方法
 def useDataBase(dbName):
     dbdescName = "db.desc"
     if os.path.isfile(dbdescName) == False:
@@ -37,16 +39,19 @@ def useDataBase(dbName):
 '''
 建立一级索引
 '''
-def lineIndex(attrs,tableName,fileName):
-    print 'create index on ',tableName
+def lineIndex(attrs,tableName,fileName,newAll = False):
+    print 'create index on ',tableName,attrs,fileName,
     rf = open(fileName,"r")
     wfs = []
     path = os.path.join(DATABASE,"index")
     if os.path.isdir(path) == False:
         os.mkdir(path)
+    attrOrders = []#属性序号
     for each in attrs:
+        attrOrders.append(getAttrOder(tableName,each))
         wf = open(os.path.join(path,tableName+"_"+each),"w")
-        wfs.append(wf)   
+        wfs.append(wf)
+    print attrOrders
     loc = rf.tell()
     line = rf.readline()
     lineCount = 0#从第0行开始
@@ -55,7 +60,7 @@ def lineIndex(attrs,tableName,fileName):
         values = line.split("|")
         values.pop()#del the emputy char       
         for i in range(len(wfs)):
-            wfs[i].write(values[i]+"\t"+str(lineCount)+"\n")
+            wfs[i].write(values[attrOrders[i]]+"\t"+str(lineCount)+"\n")
         countText += str(loc)+"\n"        
         loc = rf.tell()
         lineCount += 1
@@ -170,7 +175,11 @@ def firstIndex(table,attr):
 def sort(fileName,attrType):
     dic = collections.defaultdict(list)
     path = os.path.join(DATABASE,"index")
-    rf = open(os.path.join(path,fileName),"r")
+    pathfile = os.path.join(path,fileName)
+    if os.path.isfile(pathfile) == False:#还没有抽取该属性
+        ta = fileName.split("_")
+        firstIndex(ta[0],ta[1])
+    rf = open(pathfile,"r")
     line = rf.readline()
     line = line[0:-1]
     while line != None and len(line) > 2:
@@ -196,6 +205,7 @@ def sort(fileName,attrType):
     wf = gzip.open(os.path.join(sortdir,fileName+".gz"),'wb',compresslevel = 4)
     block = ""
     newblock = True#新块标志
+    endloc=0
     for k in li:
         if newblock == True:
             blockattr = str(k[0])#块首属性值
@@ -206,29 +216,49 @@ def sort(fileName,attrType):
         line = line[0:-1]#delete the last " "
         block += line+"\n"
         if len(block) > BLOCKSIZE:
-            secondloc = wf.tell()
-            scwf.write(blockattr+SPLITTAG+str(secondloc)+'\n')
+            startloc = endloc
             wf.write(block)
+            endloc = wf.tell()
+            size = endloc - startloc
+            scwf.write(blockattr+SPLITTAG+str(startloc)+SPLITTAG+str(size)+'\n')
             block = ""#块清空
             newblock = True#新块，下次循环记住新块首部属性值
+    startloc = endloc
+    wf.write(block)
+    endloc = wf.tell()
+    size = endloc - startloc
+    scwf.write(blockattr+SPLITTAG+str(startloc)+SPLITTAG+str(size)+'\n')#不足块大小部分写入
+    
     scwf.flush()  
     scwf.close()
     wf.flush()  
     wf.close()
-#对每个表的每个属性进行排序
+#对每个表的每个属性进行排序,并建立二级索引
 def sortAllIndex():
-    descDic = loadMetaData()
-    for table,desc in descDic.items():
-        for i in range(1,len(desc)):
-            fileName = table+"_"+desc[i][0]
-            attrType = desc[i][1].split("(")[0]#对INT分割也成立哦
+    meta = loadMetaData()
+    for table,desc in meta.items():
+        desc.pop('primary')#忽略主键
+        for attr,domain in desc.items():
+            fileName = table+"_"+attr
+            attrType = domain.split("(")[0]#对INT分割也成立哦
             print fileName,attrType
             sort(fileName,attrType)
-    
+
+#获取表中某个表的属性序号
+#
+def getAttrOder(table,attr):
+    meta = loadMetaData()
+    tableDesc = meta[table]
+    count = -1
+    for k,v in tableDesc.items():
+        count += 1
+        if k == attr:
+            return count
 #读入元数据表
+#元数据返回格式为：{"tableName":{"primary":[attr1,attr2,...],"attr1":"desc1",...},...}
+#其中的内层字典是有序字典，可供定位属性值
 def loadMetaData():
-    meta = "meta.table"
-    fileName = os.path.join(DATABASE,meta)
+    fileName = os.path.join(DATABASE,"meta.table")
     mdFile = open(fileName,"r")
     line = mdFile.readline()
     tableNames = line.split(SPLITTAG)
@@ -236,15 +266,15 @@ def loadMetaData():
     descDic = {}
     line = mdFile.readline()
     while line != None and len(line) > 2:#最后空行不处理        
-        desc = []
+        desc =collections.OrderedDict() 
         temp = line.split(SPLITTAG)
-        primary = temp[1].split(" ")[0].split(",")
-        desc.append(primary)#primary key
+        primary = temp[1].split(" ")[0].split(",")        
         for i in range(2,len(temp)):
             attrDesc = temp[i].split(' ')
             while "" in attrDesc:#删掉空格，只留下属性名和限制
                 attrDesc.remove("")
-            desc.append(attrDesc)
+            desc[attrDesc[0]]=attrDesc[1]
+        desc["primary"]=primary#primary key加在有序字典最后
         descDic[temp[0]] = desc
         line = mdFile.readline()
     return descDic
@@ -258,23 +288,65 @@ def createIndex(table,attr):
         print 'Error code:',NO_SUCH_TABKE,'No such table:',table
         exit(NO_SUCH_TABKE)
     desc = descDic[table]
-    attrType=None
-    for i in range(2,len(desc)):#找属性的类型
-        if attr == desc[i][0]:
-            attrType = desc[i][1]
-            break
+    attrType=desc[attr].split("(")[0]
     if attrType == None:#属性输入错误
         from errortype import NO_SUCH_ATTR
         print 'Error code:',NO_SUCH_ATTR,'No such attribute:',attr,' in:',table
         exit(NO_SUCH_TABKE)
     firstIndex(table,attr)#建立一级索引
     sort(table+"_"+attr,attrType)#建立二级索引    
-
+'''
+指定表压缩
+'''
+def condense(table):
+    table = table.lower()
+    filename = os.path.join(DATABASE,table+".tbl")
+    tablefile = open(filename,"r")
+    filename = os.path.join(DATABASE,table+".tb")
+    cdsfile = gzip.open(filename,'wb',compresslevel = 4)
+    readlength = 16*1024
+    while True:
+        text = tablefile.read(readlength)
+        cdsfile.write(text)
+        if len(text) < readlength:
+            break
+    cdsfile.flush()
+    cdsfile.close()
+    tablefile.close()
+def condenseAll():
+    print
     
+def testread():
+    table = "orders"
+    filename = os.path.join(DATABASE,table+".tbl")
+    tablefile = open(filename,"r")
+    filename = os.path.join(DATABASE,table+".tb")
+    cdsfile = gzip.open(filename,'rb')
+    loc = 10234
+    tablefile.seek(loc)
+    print tablefile.read(100)
+    print 80*"*"
+    cdsfile.seek(loc)
+    print cdsfile.read(100)
+    #cdsfile.colse()
+    tablefile.close()
+def testUseCondense():
+    filename = "minidb\\sorted\\CUSTOMER_C_ADDRESS.gz"
+    cdsfile = gzip.open(filename,'rb')
+    cdsfile.seek(442759)
+    print cdsfile.read(100)
+    
+if not METADATA:
+    METADATA = loadMetaData()  
 if __name__=="__main__":
-    #sort("LINEITEM_L_SUPPKEY","INT")
+    #sort("CUSTOMER_C_ADDRESS","VARCHAR")
     #sortAllIndex()
-    #createIndex("CUSTOMER","C_NATIONKEY")
+    createIndex("ORDERS","O_ORDERDATE")
+    #condense("orders")
+    #testread()
+    #testUseCondense()
+    #sortAllIndex()
+  
     
 '''
     supplier()

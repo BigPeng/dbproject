@@ -8,9 +8,8 @@ import time
 
 DATABASE = "minidb"
 SPLITTAG = "|"
-BLOCKSIZE = 16384
-METADATA =None
-
+BLOCKSIZE = 32768#16384
+METADATA = None
 
 '''
 获取数据库名字
@@ -181,7 +180,6 @@ def sort(fileName,attrType):
         firstIndex(ta[0],ta[1])
     rf = open(pathfile,"r")
     line = rf.readline()
-    line = line[0:-1]
     while line != None and len(line) > 2:
         line = line[0:-1]#del '\n'
         vkpair = line.split("\t")
@@ -334,18 +332,19 @@ def testUseCondense():
     filename = "minidb\\sorted\\CUSTOMER_C_ADDRESS.gz"
     cdsfile = gzip.open(filename,'rb')
     cdsfile.seek(442759)
-    print cdsfile.read(100)
-    
+    print cdsfile.read(100)  
 if not METADATA:
+    print 'Init meta data'
     METADATA = loadMetaData()  
 if __name__=="__main__":
+    
     #sort("CUSTOMER_C_ADDRESS","VARCHAR")
     #sortAllIndex()
-    createIndex("ORDERS","O_ORDERDATE")
+    #createIndex("NATION","N_NATIONKEY")
     #condense("orders")
     #testread()
     #testUseCondense()
-    #sortAllIndex()
+    sortAllIndex()
   
     
 '''

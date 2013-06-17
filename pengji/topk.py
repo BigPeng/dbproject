@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 import os
 import gzip
-from createindex import DATABASE,loadMetaData,SPLITTAG
+from createindex import DATABASE,METADATA,SPLITTAG
+from parsesql import parseSql,inputSql
 
 '''
 读取压缩二级索引的一个块
@@ -26,37 +27,7 @@ def compareValue(valueA,compare,valueB):
         return valueA < valueB
     elif compare == ">":
         return valueA > valueB    
-'''
-二叉查找blockIn = False查找块，blockIn = True快内查找
-查找块时，即便是等值查找也只是找到满足<=value的块
-    二级索引格式如下：
-    ["1|0|16392","1862|16392|16390"...]
-    value要与属性值比较，需进行分割
-    返回scIndex对应的下标
-    
-块内查找时，等值查找必须相等
-4,lzz5Uyym0WUT9HaMN|126466
-4,m1Kkd8WdalsDyzQPCF|80784
-4,m5twD7nF7,rlta0p|102107
-'''
-def binarySearch(scIndex,compare,value,domain,blockIn = False):
-    length = len(scIndex)
-    high =length -1
-    low = 0
-    while low <= high:
-        middle = (low + high) / 2
-        valueLoc = scIndex[middle].split(SPLITTAG)
-        attrValue = valueLoc[0]
-        if domain == "INT":
-            attrValue = int(attrValue)
-        elif domain == "decimal":
-            attrValue = float(attrValue)
-        if compareValue(attrValue,compare,value):
-            if "=" in compare:#"=","<=",">="，满足比较条件即找到
-                return middle
-            else:
-                if middle <length:
-                    print 
+
 
 def binaryEqualSearch(scIndex,compare,value,domain,blockIn = False):
     length = len(scIndex)
@@ -72,19 +43,191 @@ def binaryEqualSearch(scIndex,compare,value,domain,blockIn = False):
             attrValue = float(attrValue)
         if compareValue(attrValue,compare,value):           
             return middle
-            
-        
+'''
+在二级索引中折半查找大于等于的块头
+'''
+def mBinarySearch(scIndex,compare,value,domain):
+    compare = compare.replace('>','<')
+    length = len(scIndex)
+    high =length -1
+    low = 0
+    while low <= high:
+        middle = (low + high) / 2
+        valueLoc = scIndex[middle].split(SPLITTAG)
+        attrValue = valueLoc[0]
+        if domain == "INT":
+            attrValue = int(attrValue)
+        elif domain == "decimal":
+            attrValue = float(attrValue)
+        if middle == 0 and compareValue(attrValue,'>',value):
+            return 0
+        if compareValue(attrValue,compare,value):           
+            if middle == length-1:
+                return middle
+            else:
+                if compareValue(attrValue,'>',value):
+                    return middle
+                else:
+                    low = middle + 1#还在右半部分
+        else:
+            high = middle - 1#还在左半部分
+    return -1
+
+#折半范围查找
+#若查找成功，返回最大的下标，满足data[i]<value或data[i]<=value
+#若不存在制定的范围，则返回-1
+#blockFind=False 表示在块内查找，blockFind = True表示在块的索引上查找
+
+def binarySearch(scIndex,compare,value,domain,blockFind = False):
+    length = len(scIndex)
+    low = 0
+    high = length - 1
+    while low <= high:#等值折半查找value
+        middle = (high-low) / 2 + low
+        valueLoc = scIndex[middle].split(SPLITTAG)
+        attrValue = valueLoc[0]
+        if domain == "INT":
+            attrValue = int(attrValue)
+        elif domain == "decimal":
+            attrValue = float(attrValue)
+        if attrValue == value:
+            break#找到value，跳出循环
+        if attrValue < value:
+            low = middle + 1
+        else:
+            high = middle - 1
+    fmt = '%10s   %10s   %10s'
+    print fmt % ('Seach',value,compare)
+    print fmt % ('low','middle','high')
+    print fmt % (low,middle,high)
+    #print fmt % (scIndex[low],scIndex[middle],scIndex[high])
+    if low <= high:#value在data中
+        if compare == '<=' or compare == '>=' or compare == '=':#包含‘=’的比较，直接返回值value的下标
+            return middle
+        elif compare == '<':#'<'需要返回前面一个下标，有可能为-1
+            return middle - 1
+        else:
+            #(compare == '>')    '>'需要返回后面一个下标
+            if middle == length -1:#middle等于有序表长度时，表示不存在data[i]>value，返回-1
+                return -1
+            else:
+                return middle + 1#返回后面一个下标
+    else:#value不在data中，此时high = low - 1,如果查找成功，value 在(high,low)的开区间中
+        if compare == '=':
+            return -1#等值查找，返回-1，查找失败
+        elif compare == '<' or compare == '<=':#返回区间左边端点，有可能返回-1
+            return high
+        else:
+            #compare == '>' or compare == '>='
+            if low >= length:#不存在区间，返回-1
+                return -1
+            else:
+                if blockFind == False:
+                    return low#返回区间右端点
+                else:
+                    return high#查找块应该返回左端点
+                
+def equalFind(attr,compare,value):
+    attr = attr.upper()
+    ta = attr.split(".")#table.attr
+    desc = METADATA[ta[0]]
+    domain = desc[ta[1]].split("(")[0]#值域,decimal(15,2)
+    if domain == "INT":
+        value = int(value)
+    if domain == "DECIMAL":
+        value = float(value)
+    fileName = ta[0]+"_"+ta[1]    
+    path = os.path.join(DATABASE,"secondindex")
+    scIndexFile = open(os.path.join(path,fileName),"r")#读索引文件
+    scIndex = scIndexFile.read().split("\n")
+    if len(scIndex[-1]) == 0:
+        scIndex.pop()#删除最后一个无用字符
+    satisfyList = []    
+    index = binarySearch(scIndex,'<=',value,domain,blockFind=True)
+    if index == -1:#没找到满足条件的
+        return satisfyList
+    print 'index:',index
+    string = ''
+    if type(scIndex[index]) == type(string):
+            scIndex[index] = scIndex[index].split(SPLITTAG)
+    block = readIndexBlock(fileName,scIndex[index][1],scIndex[index][2])
+    blockLines = block.split("\n")
+    if len(blockLines[-1]) == 0:
+        blockLines.pop()#删除最后一个无用字符
+    lineIndex = binarySearch(blockLines,compare,value,domain)
+    if lineIndex == -1:#没找到满足条件的
+        return satisfyList
+    blockAttr = blockLines[lineIndex].split(SPLITTAG)
+    blockAttr.pop(0)
+    satisfyList += blockAttr
+    satisfyList.append(ta[0])
+    return satisfyList
+    
+'''
+单表大于等于查询
+'''
+def moreFind(attr,compare,value):
+    attr = attr.upper()
+    ta = attr.split(".")#table.attr
+    desc = METADATA[ta[0]]
+    domain = desc[ta[1]].split("(")[0]#值域,decimal(15,2)
+    if domain == "INT":
+        value = int(value)
+    if domain == "DECIMAL":
+        value = float(value)
+    fileName = ta[0]+"_"+ta[1]    
+    path = os.path.join(DATABASE,"secondindex")
+    scIndexFile = open(os.path.join(path,fileName),"r")#读索引文件
+    scIndex = scIndexFile.read().split("\n")
+    if len(scIndex[-1]) == 0:
+        scIndex.pop()#删除最后一个无用字符
+    satisfyList = []    
+    index = binarySearch(scIndex,compare,value,domain,blockFind=True)
+    if index == -1:#没找到满足条件的
+        return satisfyList
+    print 'index:',index
+    string = ''
+    if type(scIndex[index]) == type(string):
+            scIndex[index] = scIndex[index].split(SPLITTAG)
+    block = readIndexBlock(fileName,scIndex[index][1],scIndex[index][2])
+    blockLines = block.split("\n")
+    if len(blockLines[-1]) == 0:
+        blockLines.pop()#删除最后一个无用字符
+    lineIndex = binarySearch(blockLines,compare,value,domain)
+    print 'lineIndex',lineIndex
+    for i in range(lineIndex,len(blockLines)):#读取块内满足条件的部分
+        blockAttr = blockLines[i].split(SPLITTAG)
+        print blockAttr.pop(0)
+        satisfyList += blockAttr    
+    for i in range(index+1,len(scIndex)):#依次读取整块
+        if type(scIndex[i]) == type(string):
+            scIndex[i] = scIndex[i].split(SPLITTAG)
+        block = readIndexBlock(fileName,scIndex[i][1],scIndex[i][2])
+        blockLines = block.split("\n")
+        if len(blockLines[-1]) == 0:
+            blockLines.pop()#删除最后一个无用字符
+        for each in blockLines:
+            blockAttr = each.split(SPLITTAG)
+            blockAttr.pop(0)
+            satisfyList += blockAttr
+    satisfyList.append(ta[0])
+    return satisfyList
+    
+    
     
 
 '''
 单表小于查询
 '''
-def lessFind(attr,compare,value):
-    METADATA = loadMetaData()
+def lessFind(attr,compare,value):   
     attr = attr.upper()
     ta = attr.split(".")#table.attr
     desc = METADATA[ta[0]]
     domain = desc[ta[1]].split("(")[0]#值域,decimal(15,2)
+    if domain == "INT":
+        value = int(value)
+    if domain == "DECIMAL":
+        value = float(value)
     fileName = ta[0]+"_"+ta[1]    
     path = os.path.join(DATABASE,"secondindex")
     scIndexFile = open(os.path.join(path,fileName),"r")#读索引文件
@@ -92,7 +235,6 @@ def lessFind(attr,compare,value):
     if len(scIndex[-1]) == 0:
         scIndex.pop()#删除最后一个无用字符
     satisfyList = []
-    satisfyList.append(ta[0])#第一步添加表名，以备以后查找
     for i in range(len(scIndex)):        
         blockAttr = scIndex[i].split(SPLITTAG)
         attrValue = blockAttr[0]
@@ -117,10 +259,11 @@ def lessFind(attr,compare,value):
                     satisfyList += blockAttr
                 else :
                     break#出现大于，终止
-                    break
+                    
         else:
             break#整块大于,终止
         #print 'block:',i,len(satisfyList)
+    satisfyList.append(ta[0])#添加表名，以备以后查找
     return satisfyList
    
         
@@ -138,18 +281,92 @@ def findInTable(attr,compare,value):
     elif compare == "<":
         return lessFind(attr,compare,value)
     elif compare == "<=":
-        return lEqualFind(attr,compare,value)
+        return lessFind(attr,compare,value)
     elif compare == ">=":
-        return mEqualFind(attr,compare,value)
+        return moreFind(attr,compare,value)
     else:
         print "Unsupport compare:",compara
         return None
 
+def binarySeach(value,li):
+    low = 0
+    high = len(li)-1
+    while low <= high:
+        mid = (high - low) / 2 + low
+        if li[mid] == value:
+            return mid
+        elif value > li[mid] :#在右边
+            low = mid + 1
+        else:
+            high = mid - 1
+    return -1
+def binaryGet(line,satisfy):
+    inSatisfy = []
+    line.pop(0)#第一个是属性值
+    if satisfy == None:
+        return inSatisfy
+    for eachLoc in line:
+        if binarySeach(eachLoc,satisfy) != -1:
+            inSatisfy.append(eachLoc)
+    return inSatisfy
 '''
-根据比较条件join两个表
+根据比较条件join两个表，只考虑等值连接
+在单表查询的基础上进行连接
 '''
-def joinTable(attr,compare,para):
-    print '还没实现呢'
+def joinTable(attr,compare,para,leftSatisfy,rightSatisfy):
+    if leftSatisfy != None:#先排序
+        leftSatisfy.pop()
+        leftSatisfy = sorted(leftSatisfy)
+    if rightSatisfy != None:
+        rightSatisfy.pop()
+        rightSatisfy = sorted(rightSatisfy)
+    path = os.path.join(DATABASE,"secondindex")
+    leftFileName = attr.replace(".","_")
+    rightFileName = para.replace(".","_")
+    path = os.path.join(DATABASE,"secondindex")
+    leftScIndexFile = open(os.path.join(path,leftFileName),"r")#读索引文件
+    leftScIndex = leftScIndexFile.read().split("\n")
+    if len(leftScIndex[-1]) == 0:
+        leftScIndex.pop()#删除最后一个无用字符
+    rightScIndexFile = open(os.path.join(path,rightFileName),"r")#读索引文件
+    rightScIndex = rightScIndexFile.read().split("\n")
+    if len(rightScIndex[-1]) == 0:
+        rightScIndex.pop()#删除最后一个无用字符
+    i = j = 0
+    joinResult = []    
+    leftBlock = readIndexBlock(leftFileName,leftScIndex[i][1],leftScIndex[i][2])
+    rightBlock = readIndexBlock(rightFileName,rightScIndex[j][1],rightScIndex[j][2])
+    i += 1
+    j += 1
+    leftBlockLines = leftBlock.split("\n")
+    rightBlockLines = rightBlock.split("\n")
+    lNum = rNum = 0
+    while i < len(leftScIndex) and j < len(rightScIndex):
+	leftLine = leftBlockLines[lNum].split(SPLITTAG)
+	rightLine = rightBlockLines[rNum].split(SPLITTAG)
+	if leftLine[0] < rightLine[0]:
+            lNum += 1#左表下标后移
+	elif leftLine[0] > rightLine[0]:
+	    rNum += 1
+	else:#相等
+	    inLeftSatisfy = binaryGet(leftLine,leftSatisfy)
+	    inRightSatisfy = binaryGet(rightLine,rightSatisfy)
+	    for eachLeft in inLeftSatisfy:
+		for eachRight in inRightSatisfy:
+		    joinResult.append([eachLeft,eachRight])
+	    lNum += 1
+	    rNum += 1
+	if lNum >= len(leftBlockLines):
+	    leftBlock = readIndexBlock(leftFileName,leftScIndex[i][1],leftScIndex[i][2])
+	    leftBlockLines = leftBlock.split("\n")
+	    i += 1
+	if rNum >= len(rightBlockLines):
+	    rightBlock = readIndexBlock(rightFileName,rightScIndex[j][1],rightScIndex[j][2])
+	    leftBlockLines = leftBlock.split("\n")
+	    rightBlockLines = rightBlock.split("\n")
+	    j += 1
+    joinResult.append([attr.split('.')[0],para.split('.')])
+    return joinResult    
     
 '''
 判断操作数是不是属性，是属性必须满足table.attr格式
@@ -164,11 +381,10 @@ def isAttr(para):
         meta = METADATA
         if table in meta:
             desc = meta[table]
-            for attrdesc in desc:
-                if attr in attrdesc:
-                    return True
-                else:#属性名不对
-                    return False
+            if attr in desc:
+                return True
+            else:#属性名不对
+                return False
         else:#表名不对
             return False
 '''
@@ -179,11 +395,21 @@ satisfy = [(table1,table2,...),(1,5,...)...]
 '''
 
 def getSatisfy(conditions):
+    firstResult = []
     for attr,compare,para in conditions:
         if isAttr(para) == True:
-            return joinTable(attr,compare,para)
-        else:
-            return findInTable(attr,compare,para)
+            leftSatisfy = rightSatisfy = None
+            for tempResult in firstResult:#找出单表的查询结果
+                if len(tempResult[-1]) == 1:
+                    if tempResult[-1] == attr.split(".")[0]:
+                        leftSatisfy = tempResult
+                    elif tempResult[-1] == para.split(".")[0]:
+                        rightSatisfy = tempResult
+            joinResult = joinTable(attr,compare,para,leftSatisfy,rightSatisfy)
+            firstResult.append(joinResult)
+        else:#先处理单表查询
+            firstResult.append(findInTable(attr,compare,para))
+    return firstResult
 ##def binarySeach(value,candidate):
 ##    length = len(candidate)
 ##    high = lenght -1
@@ -191,10 +417,16 @@ def getSatisfy(conditions):
 ##    while low < high:
 ##        mid = (low + high) / 2
 ##        if 
-        
+
+def list2set(candidate):
+    canSet = set()
+    for each in candidate:
+        canSet.add(each)
+    return canSet
 def topK(k,orderAttrs,candidate):
-    order = "DESC"
-    orderAttr = orderAttrs[0]
+    #candidate = list2set(candidate)
+    order = orderAttrs[0][1]
+    orderAttr = orderAttrs[0][0]
     orderAttr = orderAttr.upper()
     ta = orderAttr.split('.')
     fileName = ta[0]+"_"+ta[1]    
@@ -211,23 +443,23 @@ def topK(k,orderAttrs,candidate):
     else:
         blockVisiteList = range(len(scIndex))
     for i in blockVisiteList:
-        print 'block:',i
+        print 'block',i
         blockAttr = scIndex[i].split(SPLITTAG)
         block = readIndexBlock(fileName,blockAttr[1],blockAttr[2])
-        print block
         blockLines = block.split("\n")
         if order == "DESC":#降序
             visiteList = range(len(blockLines)-1,-1,-1)
         else:
             visiteList = range(len(blockLines))
+            
         for j in visiteList:            
             lineAttr = blockLines[j].split(SPLITTAG)
             for index in range(1,len(lineAttr)):
                 if lineAttr[index] in candidate:
                     topList.append(lineAttr[index])
-                    print lineAttr[0],lineAttr[index]
                     selectedNum += 1
-                    if selectedNum >= k:
+                    print k,selectedNum
+                    if selectedNum >= int(k):
                         return topList
                     
 
@@ -259,7 +491,9 @@ def readRecord(resultAttr,satisfy):
         record = tableFile.readline().split("|")
         record.pop()#最后一个空字符
         result.append(record)
+    #if resultAttr[0] == "*":
     return result
+
           
     
 '''求topN
@@ -270,25 +504,43 @@ conditions = [(table.attr,compareTag,table.attr|value),(...)...]
 orderAttrs = [table.attr,table.attr...]
 首先根据条件选出满足条件的记录，再对记录按指定属性排序，最后投影出输出属性
 '''
-def selectTopK(tables,k,resultAttr,conditions,orderAttrs):
+def selectTopK(k,resultAttr,conditions,orders):
     satisfy = getSatisfy(conditions)
-    print len(satisfy)
-    kItems = topK(k,orderAttrs,satisfy)
+    print 'satisfy',len(satisfy[0])
+    if len(satisfy[0]) <= 1:
+        print '查询结果为空'
+        return
+    kItems = topK(k,orders,satisfy[0])
     #kItems = sorted(kItems)
     result = readRecord(resultAttr,kItems)
-    print "result",result
-    
+    print "result",result  
    
 
+def despathSelect(sqlDic):
+    tables = sqlDic['FROM']
+    select = sqlDic['SELECT']
+    conditions = sqlDic['WHERE']
+    groups = sqlDic["GROUP"]
+    orders = sqlDic['ORDER']
+    if "TOP" in select[0]:
+        k = select[0][2]
+        resultAttr = []
+        for each in select:
+            resultAttr.append(each[0])
+        selectTopK(k,resultAttr,conditions,orders)
+    
 
 if __name__ == "__main__":
-    tables = ['ORDERS']
-    resultAttr = ['*']
-    conditions = [('ORDERS.O_ORDERDATE','<','1995-03-08')]
-    orderAttrs = ['ORDERS.O_TOTALPRICE']
-    k=20
+    sql = inputSql()
+    sqlDic = parseSql(sql,METADATA)
+    print sqlDic
+    for k,v in sqlDic.items():
+        print k,v
+        
+
     import time
     t1 = time.time()
     print t1
-    selectTopK(tables,k,resultAttr,conditions,orderAttrs)
+    despathSelect(sqlDic)
     print time.time(),time.time()-t1
+

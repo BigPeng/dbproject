@@ -301,10 +301,10 @@ def binarySeach(value,li):
             high = mid - 1
     return -1
 def binaryGet(line,satisfy):
-    inSatisfy = []
-    line.pop(0)#第一个是属性值
     if satisfy == None:
-        return inSatisfy
+        return line
+    inSatisfy = []
+    line.pop(0)#第一个是属性值    
     for eachLoc in line:
         if binarySeach(eachLoc,satisfy) != -1:
             inSatisfy.append(eachLoc)
@@ -314,12 +314,17 @@ def binaryGet(line,satisfy):
 在单表查询的基础上进行连接
 '''
 def joinTable(attr,compare,para,leftSatisfy,rightSatisfy):
+    ta = attr.split(".")#table.attr
+    desc = METADATA[ta[0]]
+    domain = desc[ta[1]].split("(")[0]#值域,decimal(15,2)
     if leftSatisfy != None:#先排序
         leftSatisfy.pop()
         leftSatisfy = sorted(leftSatisfy)
     if rightSatisfy != None:
         rightSatisfy.pop()
         rightSatisfy = sorted(rightSatisfy)
+    print len(leftSatisfy)
+    print len(rightSatisfy)
     path = os.path.join(DATABASE,"secondindex")
     leftFileName = attr.replace(".","_")
     rightFileName = para.replace(".","_")
@@ -333,39 +338,67 @@ def joinTable(attr,compare,para,leftSatisfy,rightSatisfy):
     if len(rightScIndex[-1]) == 0:
         rightScIndex.pop()#删除最后一个无用字符
     i = j = 0
-    joinResult = []    
-    leftBlock = readIndexBlock(leftFileName,leftScIndex[i][1],leftScIndex[i][2])
-    rightBlock = readIndexBlock(rightFileName,rightScIndex[j][1],rightScIndex[j][2])
+    joinResult = []
+    leftAttr = leftScIndex[i].split(SPLITTAG)
+    rightAttr = rightScIndex[i].split(SPLITTAG)
+    leftBlock = readIndexBlock(leftFileName,leftAttr[1],leftAttr[2])
+    rightBlock = readIndexBlock(rightFileName,rightAttr[1],rightAttr[2])
     i += 1
     j += 1
     leftBlockLines = leftBlock.split("\n")
     rightBlockLines = rightBlock.split("\n")
+    if len(leftBlockLines[-1])==0:
+        leftBlockLines.pop()
+    if len(rightBlockLines[-1])==0:
+        rightBlockLines.pop()
     lNum = rNum = 0
     while i < len(leftScIndex) and j < len(rightScIndex):
-	leftLine = leftBlockLines[lNum].split(SPLITTAG)
-	rightLine = rightBlockLines[rNum].split(SPLITTAG)
-	if leftLine[0] < rightLine[0]:
+        leftLine = leftBlockLines[lNum].split(SPLITTAG)
+        rightLine = rightBlockLines[rNum].split(SPLITTAG)
+        if len(leftLine[-1])==0:
+            leftLine.pop()
+        if len(rightLine[-1])==0:
+            rightLine.pop()
+        leftValue = leftLine[0]
+        rightValue = rightLine[0]
+        if domain == "INT":
+            leftValue = int(leftValue)
+            rightValue = int(rightValue)
+        if domain == "DECIMAL":
+            leftValue = float(leftValue)
+            rightValue = float(rightValue)
+        #print leftValue,  rightValue  
+        if leftValue < rightValue:            
             lNum += 1#左表下标后移
-	elif leftLine[0] > rightLine[0]:
-	    rNum += 1
-	else:#相等
-	    inLeftSatisfy = binaryGet(leftLine,leftSatisfy)
-	    inRightSatisfy = binaryGet(rightLine,rightSatisfy)
-	    for eachLeft in inLeftSatisfy:
-		for eachRight in inRightSatisfy:
-		    joinResult.append([eachLeft,eachRight])
-	    lNum += 1
-	    rNum += 1
-	if lNum >= len(leftBlockLines):
-	    leftBlock = readIndexBlock(leftFileName,leftScIndex[i][1],leftScIndex[i][2])
-	    leftBlockLines = leftBlock.split("\n")
-	    i += 1
-	if rNum >= len(rightBlockLines):
-	    rightBlock = readIndexBlock(rightFileName,rightScIndex[j][1],rightScIndex[j][2])
-	    leftBlockLines = leftBlock.split("\n")
-	    rightBlockLines = rightBlock.split("\n")
-	    j += 1
-    joinResult.append([attr.split('.')[0],para.split('.')])
+        elif leftValue > rightValue:
+            rNum += 1
+        else:#相等
+            inLeftSatisfy = binaryGet(leftLine,leftSatisfy)
+            inRightSatisfy = binaryGet(rightLine,rightSatisfy)
+            for eachLeft in inLeftSatisfy:
+                for eachRight in inRightSatisfy:
+                    joinResult.append([leftValue,eachLeft,eachRight])
+            lNum += 1
+            rNum += 1
+        if lNum >= len(leftBlockLines):
+            leftAttr = leftScIndex[i].split(SPLITTAG)
+            leftBlock = readIndexBlock(leftFileName,leftAttr[1],leftAttr[2])
+            leftBlockLines = leftBlock.split("\n")
+            if len(leftBlockLines[-1])==0:
+                leftBlockLines.pop()
+            i += 1
+            lNum = 0#块内下标重置0
+        if rNum >= len(rightBlockLines):
+            rightAttr = rightScIndex[j].split(SPLITTAG)
+            rightBlock = readIndexBlock(rightFileName,rightAttr[1],rightAttr[2])
+            rightBlockLines = rightBlock.split("\n")
+            if len(rightBlockLines[-1])==0:
+                rightBlockLines.pop()
+            j += 1
+            rNum = 0
+    print i,j
+    joinResult.append([attr.split(".")[0],para.split(".")[0]])
+    print len(joinResult)
     return joinResult    
     
 '''
@@ -387,6 +420,12 @@ def isAttr(para):
                 return False
         else:#表名不对
             return False
+def joinResultNum(firstResult):
+    count = 0
+    for each in firstResult:
+        if type(each[-1]) == type(each):
+            count += 1
+    return count
 '''
 conditions = [(table.attr,compareTag,table.attr|value),(...)...]
 找出满足条件的记录，输出格式如：
@@ -396,11 +435,13 @@ satisfy = [(table1,table2,...),(1,5,...)...]
 
 def getSatisfy(conditions):
     firstResult = []
+    i = 0
     for attr,compare,para in conditions:
+        print attr,compare,para
         if isAttr(para) == True:
             leftSatisfy = rightSatisfy = None
             for tempResult in firstResult:#找出单表的查询结果
-                if len(tempResult[-1]) == 1:
+                if len(tempResult) > 1:
                     if tempResult[-1] == attr.split(".")[0]:
                         leftSatisfy = tempResult
                     elif tempResult[-1] == para.split(".")[0]:
@@ -408,7 +449,15 @@ def getSatisfy(conditions):
             joinResult = joinTable(attr,compare,para,leftSatisfy,rightSatisfy)
             firstResult.append(joinResult)
         else:#先处理单表查询
-            firstResult.append(findInTable(attr,compare,para))
+            result = findInTable(attr,compare,para)
+            print len(result)
+            firstResult.append(result)
+    while joinResultNum(firstResult) > 1:
+        print
+        break
+        
+    
+            
     return firstResult
 ##def binarySeach(value,candidate):
 ##    length = len(candidate)
@@ -531,16 +580,22 @@ def despathSelect(sqlDic):
     
 
 if __name__ == "__main__":
-    sql = inputSql()
-    sqlDic = parseSql(sql,METADATA)
-    print sqlDic
-    for k,v in sqlDic.items():
-        print k,v
-        
-
+##    sql = inputSql()
+##    sqlDic = parseSql(sql,METADATA)
+##    print sqlDic
+##    for k,v in sqlDic.items():
+##        print k,v
     import time
-    t1 = time.time()
-    print t1
-    despathSelect(sqlDic)
-    print time.time(),time.time()-t1
+    t1 = time.time()        
+    condition = [['CUSTOMER.C_MKTSEGMENT', '=', 'MACHINERY'],
+                 ['ORDERS.O_ORDERDATE', '<', '1995-03-11'],
+                 ['CUSTOMER.C_CUSTKEY', '=', 'ORDERS.O_CUSTKEY']]
+    getSatisfy(condition)
+    print time.time()-t1
+##
+##    import time
+##    t1 = time.time()
+##    print t1
+##    despathSelect(sqlDic)
+##    print time.time(),time.time()-t1
 

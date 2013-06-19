@@ -102,7 +102,7 @@ def parseWhere(sql):
     nextKey = nextStmtTag(sql,"WHERE")
     reg = "WHERE (.+) "+nextKey
     where = re.compile(reg).findall(sql)[0]
-    whereStmt = where.split("AND")
+    whereStmt = where.split(" AND ")
     for stmt in whereStmt:
         if "<=" in stmt:
             compare = "<="
@@ -114,7 +114,7 @@ def parseWhere(sql):
             compare = "<"
         elif ">" in stmt:
             compare = ">"       
-        reg = "^(.+)\s*"+compare        
+        reg = "^(.+)\s*"+compare
         attr = re.compile(reg).findall(stmt)[0]
         attr = rmStrSpace(attr).upper()
         reg = compare+"\s*(.+)$"
@@ -171,7 +171,7 @@ def isInTable(attr,tables,meta):
 def checkSelect(selects,tables,meta):
     for i in range(len(selects)):
         select = selects[i]
-        if select[0] == "*":
+        if "*" in select[0]:
             continue
         findTable = isInTable(select[0],tables,meta)                
         if findTable == None:
@@ -282,7 +282,6 @@ o_shippriority
 order by
 o_shippriority desc,
 o_orderdate;
-
 
 '''
     sql=inputSql()

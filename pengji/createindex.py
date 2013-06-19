@@ -11,6 +11,7 @@ SPLITTAG = "|"
 BLOCKSIZE = 32768#16384
 METADATA = None
 
+
 '''
 获取数据库名字
 db.desc文件一共两行，一行为所有数据库名字，第二行为当前使用的数据名,如：
@@ -35,6 +36,25 @@ def useDataBase(dbName):
             countfile.truncate()#清空文件
             dbdescFile.write(line+"\n"+dbName)
             return True
+def splitCloum(tableName,attrName):
+    tableName = tableName.upper()
+    attrName = attrName.upper()
+    fileName = tableName +"_" + attrName
+    path = os.path.join(DATABASE,"cloums")#写字节与行对于文件
+    if os.path.isdir(path) == False:
+        os.mkdir(path)
+    cloumFile = open(os.path.join(path,fileName),'w')
+    tableFile = open(os.path.join(DATABASE,tableName.lower()+".tbl"),'r')
+    cloum = getAttrOder(tableName,attrName)
+    line  = tableFile.readline()
+    while line != None and len(line) > 0:
+        record = line.split(SPLITTAG)
+        cloumFile.write(record[cloum]+"\n")
+        line  = tableFile.readline()
+    cloumFile.flush()
+    cloumFile.close()
+    tableFile.close()
+    
 '''
 建立一级索引
 '''
@@ -334,7 +354,7 @@ def testUseCondense():
     cdsfile.seek(442759)
     print cdsfile.read(100)  
 if not METADATA:
-    print 'Init meta data'
+    #print 'Init meta data'
     METADATA = loadMetaData()  
 if __name__=="__main__":
     
@@ -344,8 +364,8 @@ if __name__=="__main__":
     #condense("orders")
     #testread()
     #testUseCondense()
-    sortAllIndex()
-  
+    #sortAllIndex()
+    splitCloum('LINEITEM','L_ORDERKEY')
     
 '''
     supplier()

@@ -1,6 +1,6 @@
 
 该项目用python实现了一个简单列式数据库，实现了多表join和top N查询
-详细设计可以参考
+详细设计可以参考：http://www.cnblogs.com/fengfenggirl/p/minit_db.html
 数据在百度网盘：http://pan.baidu.com/share/link?shareid=361303219&uk=3271689851
 
 1、下载数据文件后，将代码放在数据文件的上层目录；
@@ -9,7 +9,10 @@
 4、运行createindex.py，将对所有的表建立索引
 5、运行join_topk.py，执行sql:
 	top N:
-	select top 20 * from ORDERS where o_orderdate< "1995-05-20"	order by o_totalprice;
+	select top 20 * 
+	from ORDERS 
+	where o_orderdate< "1995-05-20"	
+	order by o_totalprice;
 	
 	多表连接：
 	select

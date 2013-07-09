@@ -526,13 +526,10 @@ def mergeJion(condidates,indexi,indexj,cloumi,cloumj):
 ##        print 'sort before:',joina[k],joinb[k]
     #saveJoin(joina)
     #saveJoin(joinb)
-    sortJoin(joina,cloumi)    
-    sortJoin(joinb,cloumj)
-##    for k in range(1,10):
-##        print 'sort after:',joina[k],joinb[k]
+    sortJoin(joina,cloumi)#cloumi表示公共表在joina的列号    
+    sortJoin(joinb,cloumj)#cloumj表示公共表在joinb的列号
     i = j = 0
     while i < len(joina) and j < len(joinb):
-        #print 'joina[i][cloumi],joinb[j][cloumj]:',joina[i][cloumi],joinb[j][cloumj]
         if joina[i][cloumi] < joinb[j][cloumj]:
             i += 1
         elif joina[i][cloumi] > joinb[j][cloumj]:

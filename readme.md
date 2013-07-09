@@ -32,6 +32,3 @@
 	
 group by 没有实现。
 
-□
-
-ckzhang@hitsz.edu.cn
